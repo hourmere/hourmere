@@ -3649,4 +3649,10 @@ export const admin = {
     'Cleanup in the original calendar or meeting account is pending.',
   'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
     'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.',
+  // Booking handoff mail status
+  'Attendee cancellation email': 'Attendee cancellation email',
+  'Attendee confirmation email': 'Attendee confirmation email',
+  'Mail server acceptance unconfirmed': 'Mail server acceptance unconfirmed',
+  'Email delivery incomplete': 'Email delivery incomplete',
+  'Email delivery unavailable': 'Email delivery unavailable',
 } as const

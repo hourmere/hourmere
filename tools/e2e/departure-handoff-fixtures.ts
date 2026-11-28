@@ -26,7 +26,12 @@ import {
   DEPARTURE_HANDOFF_EMAIL_JOB,
   deliverDepartureHandoffEmail,
 } from '../../packages/notifications/src/departure-handoff.ts'
-import { bookingNotifier, sendBookingNotification } from '../../packages/notifications/src/index.ts'
+import {
+  BOOKING_NOTIFICATION_JOB,
+  BookingNotificationPayload,
+  bookingNotifier,
+  sendBookingNotification,
+} from '../../packages/notifications/src/index.ts'
 import { createPublicTeamBooking } from '../../packages/scheduling/src/bookings.ts'
 import type { BookingNotifier } from '../../packages/scheduling/src/context.ts'
 import {
@@ -412,6 +417,11 @@ export const test = base.extend<{
           oldMeetings: oldProvider.controls.storedMeetings.size,
         }),
         async mail(bookingId, kind, reject = false) {
+          const { rows } = await sql<{ payload: unknown }>`SELECT payload FROM e2e_handoff_jobs
+            WHERE name=${BOOKING_NOTIFICATION_JOB} AND singleton_key=${`${bookingId}:${kind}`}`.execute(
+            db,
+          )
+          const job = BookingNotificationPayload.safeParse(rows[0]?.payload)
           await sendBookingNotification(
             {
               db,
@@ -428,6 +438,7 @@ export const test = base.extend<{
             },
             bookingId,
             kind,
+            { handoff: job.success && 'handoff' in job.data ? job.data.handoff : undefined },
           )
         },
         mailState: () =>

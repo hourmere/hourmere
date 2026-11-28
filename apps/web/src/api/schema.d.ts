@@ -4961,7 +4961,7 @@ export interface paths {
         };
         /**
          * Preview one booking handoff and read its current consent or receipt
-         * @description Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a safe committed status from the same team. Staged and disabled unless a handoff store and booking notifier are wired in.
+         * @description Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a committed receipt with aggregate attendee mail status from the same team. Accepted means the mail server accepted all attendee messages of that kind. Staged and disabled unless a handoff store and booking notifier are wired in.
          */
         get: operations["previewDepartureHandoff"];
         put?: never;
@@ -7276,6 +7276,12 @@ export interface components {
             receipt: {
                 /** @enum {string} */
                 conference: "pending" | "ready" | "failed" | "not_required" | "unknown";
+                mail: {
+                    /** @enum {string} */
+                    cancellation: "pending" | "accepted" | "incomplete" | "unavailable";
+                    /** @enum {string} */
+                    confirmation: "pending" | "accepted" | "incomplete" | "unavailable";
+                };
                 /** @enum {string} */
                 oldConferenceCleanup?: "pending" | "complete" | "unresolved";
                 /** Format: uuid */

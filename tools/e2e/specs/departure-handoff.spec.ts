@@ -161,7 +161,7 @@ test('notification enqueue failure rolls back and a refreshed confirmation deliv
   expect(await handoff.result()).toEqual(result)
   await handoff.mail(replacementId, 'confirmed')
   const sent = handoff.mailState()
-  const cancellations = sent.filter((message) => message.method === 'CANCEL')
+  const cancellations = sent.filter((message) => !message.method)
   const invitations = sent.filter((message) => message.method === 'REQUEST')
   expect(cancellations.map((message) => message.to).sort()).toEqual(
     [handoff.emails.booker, handoff.emails.guest, handoff.emails.departing].sort(),
@@ -169,11 +169,7 @@ test('notification enqueue failure rolls back and a refreshed confirmation deliv
   expect(invitations.map((message) => message.to).sort()).toEqual(
     [handoff.emails.booker, handoff.emails.guest, handoff.emails.candidate].sort(),
   )
-  expect(
-    cancellations.every(
-      (mail) => mail.uid === `${handoff.sourceId}@hourmere` && mail.sequence === '1',
-    ),
-  ).toBe(true)
+  expect(cancellations.every((mail) => !mail.uid && !mail.sequence)).toBe(true)
   expect(
     invitations.every((mail) => mail.uid === `${replacementId}@hourmere` && mail.sequence === '0'),
   ).toBe(true)

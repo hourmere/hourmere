@@ -3483,4 +3483,10 @@ export const admin = {
     '原日历或会议账户仍有待处理的清理工作。',
   'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
     '无法确认原日历或会议账户中的条目是否已清理。请账户所有者检查是否仍有条目。',
+  // Booking handoff mail status
+  'Attendee cancellation email': '参与者取消邮件',
+  'Attendee confirmation email': '参与者确认邮件',
+  'Mail server acceptance unconfirmed': '邮件服务器尚未确认接收',
+  'Email delivery incomplete': '邮件投递未完成',
+  'Email delivery unavailable': '邮件投递不可用',
 } as const

@@ -634,6 +634,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             replacementBookingId: replacementId,
             oldConferenceCleanup: 'pending',
             conference: teams ? 'pending' : 'not_required',
+            mail: { cancellation: 'pending', confirmation: 'pending' },
           })
 
           await handoff.changeDefault(
@@ -671,6 +672,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             replacementBookingId: replacementId,
             oldConferenceCleanup: 'complete',
             conference: teams ? 'ready' : 'not_required',
+            mail: { cancellation: 'pending', confirmation: 'pending' },
           })
           if (teams) {
             const location = { kind: 'microsoft_teams' }
@@ -751,6 +753,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           replacementBookingId,
           oldConferenceCleanup: 'unresolved',
           conference: 'ready',
+          mail: { cancellation: 'pending', confirmation: 'pending' },
         })
         expect(provider.posts()).toHaveLength(2)
         expect(provider.events.size).toBe(2)
@@ -799,6 +802,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             replacementBookingId,
             oldConferenceCleanup: completed ? 'complete' : 'unresolved',
             conference: 'not_required',
+            mail: { cancellation: 'pending', confirmation: 'pending' },
           })
         },
       )
@@ -920,6 +924,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             replacementBookingId,
             oldConferenceCleanup: 'complete',
             conference: 'failed',
+            mail: { cancellation: 'pending', confirmation: 'pending' },
           })
         },
       )

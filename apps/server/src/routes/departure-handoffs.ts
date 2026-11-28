@@ -5,7 +5,9 @@ import {
   applyDepartureHandoff,
   type DepartureHandoffAdminStore,
   departureHandoffIssue,
+  HANDOFF_MAIL_STATES,
   HANDOFF_PREVIEW_ISSUES,
+  type HasPendingHandoffCancellation,
   readDepartureHandoffAdminPreview,
 } from '@hourmere/scheduling/departure-handoff-admin'
 import {
@@ -38,6 +40,7 @@ import {
 
 export interface DepartureHandoffs {
   store: DepartureHandoffAdminStore
+  hasPendingCancellation?: HasPendingHandoffCancellation
   enqueue?: EnqueueDepartureHandoffEmail | undefined
   enqueueRun?: EnqueueDepartureHandoffRun | undefined
   now?: () => Temporal.Instant
@@ -74,6 +77,10 @@ const Preview = z
         ...Receipt.shape,
         conference: z.enum(['pending', 'ready', 'failed', 'not_required', 'unknown']),
         oldConferenceCleanup: z.enum(['pending', 'complete', 'unresolved']).optional(),
+        mail: z.object({
+          cancellation: z.enum(HANDOFF_MAIL_STATES),
+          confirmation: z.enum(HANDOFF_MAIL_STATES),
+        }),
       })
       .nullable(),
   })
@@ -118,6 +125,7 @@ export function departureHandoffRoutes(
     handoffs?: DepartureHandoffs | undefined
     notify?: BookingNotifier | undefined
     capabilities?: TeamSsoCapabilities
+    smtpConfigured?: boolean | undefined
   },
 ): RouteModule {
   return ({ app, caller }) => {
@@ -354,7 +362,7 @@ export function departureHandoffRoutes(
         operationId: 'previewDepartureHandoff',
         summary: 'Preview one booking handoff and read its current consent or receipt',
         description:
-          'Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a safe committed status from the same team. Staged and disabled unless a handoff store and booking notifier are wired in.',
+          'Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a committed receipt with aggregate attendee mail status from the same team. Accepted means the mail server accepted all attendee messages of that kind. Staged and disabled unless a handoff store and booking notifier are wired in.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -377,6 +385,8 @@ export function departureHandoffRoutes(
             },
             handoffs.store,
             capabilities,
+            deps.smtpConfigured,
+            handoffs.hasPendingCancellation,
           ),
           200,
         )

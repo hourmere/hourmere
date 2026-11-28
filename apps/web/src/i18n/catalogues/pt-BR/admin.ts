@@ -202,4 +202,11 @@ export const admin = {
     'Muitas solicitações. Aguarde e tente novamente mais tarde.',
   'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
     'A função de proprietário só muda após uma transferência confirmada. A equipe deve manter pelo menos um proprietário.',
+  // Booking handoff mail status
+  'Attendee cancellation email': 'E-mail de cancelamento para participantes',
+  'Attendee confirmation email': 'E-mail de confirmação para participantes',
+  'Mail server acceptance unconfirmed': 'Aceitação pelo servidor de e-mail não confirmada',
+  'Accepted by the mail server': 'Aceito pelo servidor de e-mail',
+  'Email delivery incomplete': 'Entrega de e-mail incompleta',
+  'Email delivery unavailable': 'Entrega de e-mail indisponível',
 }

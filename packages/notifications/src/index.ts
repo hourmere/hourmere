@@ -111,6 +111,21 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
 export const BOOKING_NOTIFICATION_JOB = 'booking-notification'
 
+export async function hasPendingHandoffCancellation(db: Db, bookingId: string): Promise<boolean> {
+  // The handoff and this job commit together. A skipped or exhausted job cannot make
+  // further progress, even after pg-boss prunes its terminal history.
+  const result = await sql`
+    SELECT 1 FROM pgboss.job
+    WHERE name = ${BOOKING_NOTIFICATION_JOB}
+      AND policy = 'exclusive'
+      AND state <= 'active'
+      AND COALESCE(singleton_key, '') = ${`${bookingId}:cancelled`}
+      AND data = ${JSON.stringify({ bookingId, kind: 'cancelled', handoff: 'source' })}::jsonb
+    LIMIT 1
+  `.execute(db)
+  return result.rows.length > 0
+}
+
 /**
  * How long before a meeting its reminder goes out: an absolute 24 hours, so across a
  * daylight saving change it arrives an hour earlier or later on the clock.
@@ -128,6 +143,16 @@ export const CALENDAR_UID_DOMAIN = 'hourmere'
  * the job loads the booking when it runs and mints the invitee's link secret itself.
  */
 export const BookingNotificationPayload = z.union([
+  z.strictObject({
+    bookingId: z.uuid(),
+    kind: z.literal('cancelled'),
+    handoff: z.literal('source'),
+  }),
+  z.strictObject({
+    bookingId: z.uuid(),
+    kind: z.literal('confirmed'),
+    handoff: z.literal('replacement'),
+  }),
   z.strictObject({
     bookingId: z.uuid(),
     kind: z.enum(NOTIFICATION_KINDS),
@@ -168,7 +193,10 @@ export function bookingNotificationJob(deps: NotificationDeps) {
     handler: (payload, { signal }) =>
       'requestId' in payload
         ? sendRescheduleRequestNotification(deps, payload, signal)
-        : sendBookingNotification(deps, payload.bookingId, payload.kind, { signal }),
+        : sendBookingNotification(deps, payload.bookingId, payload.kind, {
+            signal,
+            handoff: 'handoff' in payload ? payload.handoff : undefined,
+          }),
   })
 }
 
@@ -218,7 +246,11 @@ export async function enqueueBookingNotifications(
   const send = (kind: NotificationKind, startAfter?: Temporal.Instant) =>
     queue.enqueue(
       BOOKING_NOTIFICATION_JOB,
-      { bookingId: event.bookingId, kind },
+      event.type === 'cancelled' && event.handoff && kind === 'cancelled'
+        ? { bookingId: event.bookingId, kind, handoff: event.handoff }
+        : event.type === 'created' && event.handoff && kind === 'confirmed'
+          ? { bookingId: event.bookingId, kind, handoff: event.handoff }
+          : { bookingId: event.bookingId, kind },
       { transaction, singletonKey: `${event.bookingId}:${kind}`, startAfter },
     )
   if (event.type === 'cancelled') {
@@ -411,6 +443,7 @@ export interface NotificationData {
   previous: { start: Temporal.Instant; end: Temporal.Instant; status: string } | undefined
   /** A booking that replaced this one (it was cancelled by a reschedule). */
   replaced: boolean
+  departureHandoffReplacement: boolean
   automaticConference: boolean
   conferenceRevision: number | undefined
   conferenceIdentity:
@@ -446,6 +479,7 @@ export function loadNotificationData(
         'b.location_option',
         'b.responses',
         'b.cancel_reason',
+        'b.notification_snapshot',
         'b.rescheduled_from_id',
         'et.title as event_title',
         'et.questions',
@@ -621,6 +655,9 @@ export function loadNotificationData(
         status: previous.status,
       },
       replaced: successor !== undefined,
+      departureHandoffReplacement:
+        isRecord(b.notification_snapshot) &&
+        b.notification_snapshot.departureHandoff === 'replacement',
       automaticConference: isRecord(b.location) && b.location.autoCreate === true,
     }
   }
@@ -895,9 +932,11 @@ async function deliverBookingNotification(
   {
     signal,
     conferenceClaim,
+    handoff: handoffIntent,
   }: {
     signal?: AbortSignal | undefined
     conferenceClaim?: ConferenceNotificationClaim | undefined
+    handoff?: 'source' | 'replacement' | undefined
   } = {},
 ): Promise<'completed' | 'skipped'> {
   const clock = deps.now ?? (() => Temporal.Now.instant())
@@ -905,6 +944,16 @@ async function deliverBookingNotification(
   if (!(await conferenceNotificationAllowed(deps.db, bookingId, kind))) return 'skipped'
   const data = await loadNotificationData(deps.db, bookingId)
   if (!data || !stillApplies(kind, data, now)) return 'skipped'
+  // Automatic conference jobs can enqueue a confirmation after the lifecycle job ran.
+  // Keep the marker with its own root, without consulting the other booking chain.
+  const handoff =
+    kind === 'cancelled' && handoffIntent === 'source'
+      ? 'source'
+      : (kind === 'confirmed' || kind === 'conference_failed') &&
+          (handoffIntent === 'replacement' || data.departureHandoffReplacement)
+        ? 'replacement'
+        : undefined
+  if (handoff && deps.mailer.deliveryAvailable === false) return 'skipped'
   const { booking, hosts, attendees } = data
   const payment =
     data.root.payment_confirmed_at &&
@@ -945,8 +994,8 @@ async function deliverBookingNotification(
   const bookingLanguage = interfaceLanguage(invitee.locale) ?? 'en'
   const guests = kind === 'conference_failed' ? [] : attendees.filter((a) => a !== invitee)
   const email: typeof bookingEmail = (...args) => ({
-    ...bookingEmail(...args),
-    sensitive: data.automaticConference || teams,
+    ...bookingEmail(args[0], args[1], args[2], { ...args[3], handoff, plainText }),
+    sensitive: data.automaticConference || teams || handoff !== undefined,
     // A collective booking's invitee and guests get no host address: their replies go to
     // MAIL_FROM, and the email says so. Single-host and round-robin reply to their host.
     replyTo:
@@ -983,27 +1032,30 @@ async function deliverBookingNotification(
     data.root.ical_organizer_name && data.root.ical_organizer_email
       ? { name: data.root.ical_organizer_name, email: data.root.ical_organizer_email }
       : undefined
-  const modern =
-    data.root.ical_version === 2 && Boolean(calendarOrganizer || deps.mailer.senderEmail)
+  const plainText = handoff === 'source' && !calendarOrganizer
+  const senderEmail = deps.mailer.senderEmail
+  const modern = data.root.ical_version === 2 && Boolean(calendarOrganizer || senderEmail)
   if (
+    !plainText &&
     !calendarOrganizer &&
     organizer &&
     kind !== 'reminder' &&
     kind !== 'conference_failed' &&
-    deps.mailer.senderEmail
+    (senderEmail || handoff === 'replacement')
   ) {
     // A collective root never pins a host address, even a legacy (v1) one first sent now.
-    const candidate = data.collective
-      ? {
-          name:
-            hosts.find((h) => h.id === organizer.id)?.displayName ||
-            bookingHostName(bookingLanguage),
-          email: deps.mailer.senderEmail,
-        }
-      : { name: organizer.name, email: modern ? deps.mailer.senderEmail : organizer.email }
+    const candidate =
+      data.collective && senderEmail
+        ? {
+            name:
+              hosts.find((h) => h.id === organizer.id)?.displayName ||
+              bookingHostName(bookingLanguage),
+            email: senderEmail,
+          }
+        : { name: organizer.name, email: modern && senderEmail ? senderEmail : organizer.email }
     calendarOrganizer = await pinCalendarOrganizer(deps.db, data.root.id, candidate)
   }
-  calendarOrganizer ??= organizer
+  if (!plainText) calendarOrganizer ??= organizer
   // Hosts listed with their addresses in a calendar invitation. Hosts see each other; an
   // invitee or guest of a collective booking sees none (ORGANIZER stays as pinned) and finds
   // every host's name in SUMMARY and DESCRIPTION.
@@ -1029,6 +1081,7 @@ async function deliverBookingNotification(
       booking.inviteePhone,
       role,
       language,
+      Boolean(handoff),
     )
     const calendarLocation = calendarMeetingLocation(location, method, language)
     return icsAttachment({
@@ -1106,6 +1159,7 @@ async function deliverBookingNotification(
             booking.inviteePhone,
             attendee === invitee ? 'invitee' : 'guest',
             bookingLanguage,
+            Boolean(handoff),
           ),
         },
         {

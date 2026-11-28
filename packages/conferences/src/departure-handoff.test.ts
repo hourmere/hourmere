@@ -190,12 +190,12 @@ describe.skipIf(!databaseUrl)('departure handoff Zoom lifecycle (real Postgres)'
         },
         {
           name: BOOKING_NOTIFICATION_JOB,
-          payload: { bookingId: sourceId, kind: 'cancelled' },
+          payload: { bookingId: sourceId, kind: 'cancelled', handoff: 'source' },
           singletonKey: `${sourceId}:cancelled`,
         },
         {
           name: BOOKING_NOTIFICATION_JOB,
-          payload: { bookingId: replacement.id, kind: 'confirmed' },
+          payload: { bookingId: replacement.id, kind: 'confirmed', handoff: 'replacement' },
           singletonKey: `${replacement.id}:confirmed`,
         },
       ]),

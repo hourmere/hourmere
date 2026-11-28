@@ -29,6 +29,9 @@ export interface DepartureHandoffAdminStore extends DepartureHandoffApplyStore {
   ): Promise<({ id: string } & DepartureHandoffOffer) | undefined>
 }
 
+/** Check cancellation work using the caller's authorized receipt snapshot. */
+export type HasPendingHandoffCancellation = (db: Db, bookingId: string) => Promise<boolean>
+
 export const HANDOFF_PREVIEW_ISSUES = [
   'calendar_sync_unavailable',
   'location_unavailable',
@@ -66,6 +69,8 @@ export function readDepartureHandoffAdminPreview(
   input: { teamId: string; expectedOrganizationId: string; bookingId: string },
   store: DepartureHandoffAdminStore,
   capabilities: TeamSsoCapabilities = ssoHardOff,
+  mailDeliveryAvailable = true,
+  hasPendingCancellation?: HasPendingHandoffCancellation,
 ) {
   return withDepartureHandoffRead(
     ctx,
@@ -85,7 +90,15 @@ export function readDepartureHandoffAdminPreview(
       if (saved?.committed) {
         return {
           ...empty,
-          receipt: await committedReceipt(db, organizationId, source, saved.committed),
+          receipt: await committedReceipt(
+            db,
+            organizationId,
+            source,
+            saved.committed,
+            now,
+            mailDeliveryAvailable,
+            hasPendingCancellation,
+          ),
         }
       }
 
@@ -166,18 +179,23 @@ export function readDepartureHandoffAdminPreview(
 
 type ConferenceState = 'pending' | 'ready' | 'failed' | 'not_required' | 'unknown'
 type CleanupState = 'pending' | 'complete' | 'unresolved'
+export const HANDOFF_MAIL_STATES = ['pending', 'accepted', 'incomplete', 'unavailable'] as const
+type MailState = (typeof HANDOFF_MAIL_STATES)[number]
 
 async function committedReceipt(
   db: Db,
   organizationId: string,
   source: { id: string; location: JsonValue },
   committed: { replacementBookingId: string },
+  now: Temporal.Instant,
+  mailDeliveryAvailable: boolean,
+  hasPendingCancellation?: HasPendingHandoffCancellation,
 ) {
   // Scope the edge's destination as well as its source, even if the backing store
   // already enforces same-team foreign keys. Project status, never provider identifiers.
   const replacement = await db
     .selectFrom('bookings')
-    .select(['id', 'location', 'status'])
+    .select(['id', 'location', 'status', 'start_at'])
     .where('organization_id', '=', organizationId)
     .where('id', '=', committed.replacementBookingId)
     .where('rescheduled_from_id', 'is', null)
@@ -196,6 +214,67 @@ async function committedReceipt(
       views.get(replacement.id)?.conference?.status,
     ),
     ...(oldConferenceCleanup && { oldConferenceCleanup }),
+    mail: await readHandoffMailState(
+      db,
+      source.id,
+      replacement,
+      now,
+      mailDeliveryAvailable,
+      hasPendingCancellation,
+    ),
+  }
+}
+
+async function readHandoffMailState(
+  db: Db,
+  sourceId: string,
+  replacement: { id: string; status: string; start_at: Date | null },
+  now: Temporal.Instant,
+  mailDeliveryAvailable: boolean,
+  hasPendingCancellation?: HasPendingHandoffCancellation,
+) {
+  const receipts = await db
+    .selectFrom('booking_attendees as a')
+    .leftJoin('booking_notifications as n', (join) =>
+      join
+        .onRef('n.booking_id', '=', 'a.booking_id')
+        .on('n.message_key', '=', '')
+        .on('n.recipient', '=', sql<string>`'attendee:' || a.id`)
+        .on(
+          'n.kind',
+          '=',
+          sql<string>`CASE WHEN a.booking_id = ${sourceId} THEN 'cancelled' ELSE 'confirmed' END`,
+        ),
+    )
+    .select(['a.booking_id', 'n.outcome'])
+    .where('a.booking_id', 'in', [sourceId, replacement.id])
+    .execute()
+  const outbox = await db
+    .selectFrom('booking_conference_notifications')
+    .select(['exhausted_at', 'skipped_at'])
+    .where('booking_id', '=', replacement.id)
+    .where('kind', '=', 'confirmed')
+    .executeTakeFirst()
+  function state(bookingId: string, closed = false): MailState {
+    const outcomes = receipts
+      .filter((row) => row.booking_id === bookingId)
+      .map((row) => row.outcome)
+    if (outcomes.length > 0 && outcomes.every((outcome) => outcome === 'sent')) return 'accepted'
+    if (closed || !outcomes.length || outcomes.some((outcome) => outcome && outcome !== 'sent'))
+      return 'incomplete'
+    return mailDeliveryAvailable ? 'pending' : 'unavailable'
+  }
+  const confirmationClosed =
+    replacement.status !== 'confirmed' ||
+    replacement.start_at === null ||
+    replacement.start_at.getTime() <= now.epochMilliseconds ||
+    Boolean(outbox?.exhausted_at || outbox?.skipped_at)
+  const cancellationClosed = hasPendingCancellation
+    ? !(await hasPendingCancellation(db, sourceId))
+    : false
+  return {
+    cancellation: state(sourceId, cancellationClosed),
+    confirmation: state(replacement.id, confirmationClosed),
   }
 }
 
