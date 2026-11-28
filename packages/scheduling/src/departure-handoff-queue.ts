@@ -1,4 +1,8 @@
 import { ssoHardOff, type TeamSsoCapabilities } from '@hourmere/auth'
+import {
+  DEPARTURE_HANDOFF_ITEM_GAP_SECONDS,
+  MAX_DEPARTURE_HANDOFF_RUN_ITEMS,
+} from '@hourmere/core/departure-handoff-run'
 import type { Database, Db } from '@hourmere/db'
 import { type AuditAction, writeAuditEvent } from '@hourmere/db/audit'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
@@ -15,7 +19,7 @@ import { departureHandoffStore } from './departure-handoff-store.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 
-export const MAX_DEPARTURE_HANDOFF_RUN_ITEMS = 10
+export { MAX_DEPARTURE_HANDOFF_RUN_ITEMS } from '@hourmere/core/departure-handoff-run'
 export const DEPARTURE_HANDOFF_RUN_STATES = [
   'running',
   'paused',
@@ -33,7 +37,7 @@ export const DEPARTURE_HANDOFF_ITEM_OUTCOMES = [
 
 const RUN_LIFETIME_MS = 30 * 60_000
 const RUN_ADMISSION_GAP_MS = 60_000
-const ITEM_GAP_MS = 10_000
+const ITEM_GAP_MS = DEPARTURE_HANDOFF_ITEM_GAP_SECONDS * 1_000
 const ACTIVE_STATES = ['running', 'paused'] as const
 
 type RunState = (typeof DEPARTURE_HANDOFF_RUN_STATES)[number]

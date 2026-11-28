@@ -21,6 +21,7 @@ const START = 'POST /api/v1/team/bookings/handoff-runs'
 const READ = `GET /api/v1/team/bookings/handoff-runs/${RUN}`
 const CONTROL = `POST /api/v1/team/bookings/handoff-runs/${RUN}/control`
 const start = 'Start automatic handoff for this departed member'
+const storageKey = `hourmere:departure-handoff-run:${VIEWER}:${TEAM}:${FORMER_HOST}`
 
 const host = { userId: FORMER_HOST, name: 'Former host', isCurrentMember: false, timeZone: 'UTC' }
 const detail = {
@@ -69,6 +70,11 @@ function panel({ viewer = VIEWER, reload = () => {} } = {}) {
   )
 }
 
+async function confirmStart(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = screen.getByRole('dialog', { name: 'Start automatic handoff?' })
+  await user.click(within(dialog).getByRole('button', { name: 'Start automatic handoff' }))
+}
+
 afterEach(() => sessionStorage.clear())
 
 it.each([
@@ -93,10 +99,12 @@ it('binds queue writes to the opening team and recovers its receipt on reopening
   let state: Schemas['DepartureHandoffRun']['state'] = 'running'
   const api = fakeApi({
     [BOOKING]: () => json(200, detail),
-    [START]: ({ body }) =>
-      (body as { runId: string }).runId === RUN
-        ? submission.response
-        : json(409, { error: 'handoff_run_rate_limited' }),
+    [START]: ({ body }) => {
+      const { runId } = body as { runId: string }
+      if (runId !== RUN) return json(409, { error: 'handoff_run_rate_limited' })
+      expect(sessionStorage.getItem(storageKey)).toBe(JSON.stringify({ id: RUN, started: false }))
+      return submission.response
+    },
     [READ]: () => json(200, receipt(state)),
     [CONTROL]: ({ body }) => {
       const action = (body as { action: 'pause' | 'resume' | 'stop' }).action
@@ -107,9 +115,26 @@ it('binds queue writes to the opening team and recovers its receipt on reopening
   const view = panel()
   const startButton = await screen.findByRole('button', { name: start })
   startButton.focus()
-  await user.keyboard('{Enter}{Enter}')
+  await user.keyboard('{Enter}')
+  const startDialog = screen.getByRole('dialog', {
+    name: 'Start automatic handoff?',
+    description:
+      'This run processes up to 10 fully approved bookings, with at least 10 seconds between bookings. You can pause or stop it.',
+  })
+  const cancelStart = within(startDialog).getByRole('button', { name: 'Cancel' })
+  expect(document.activeElement).toBe(cancelStart)
+  expect(api.to(START)).toHaveLength(0)
+  await user.click(cancelStart)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(startButton)
+  expect(api.to(START)).toHaveLength(0)
+  expect(sessionStorage.getItem(storageKey)).toBeNull()
+  await user.click(startButton)
+  await confirmStart(user)
   await screen.findByText('Updating automatic handoff…')
   expect(startButton.getAttribute('aria-disabled')).toBe('true')
+  await user.click(startButton)
+  expect(screen.queryByRole('dialog')).toBeNull()
   expect(api.to(START)).toHaveLength(1)
   expect(api.to(START)[0]?.body).toEqual({ runId: RUN, departingUserId: FORMER_HOST })
   await submission.answer(json(200, receipt()))
@@ -131,13 +156,38 @@ it('binds queue writes to the opening team and recovers its receipt on reopening
   expect(api.to(READ)).toHaveLength(1)
   await user.click(screen.getByRole('button', { name: 'Resume' }))
   await screen.findByText('Running')
-  await user.click(screen.getByRole('button', { name: 'Stop' }))
+  const stopButton = screen.getByRole('button', { name: 'Stop' })
+  await user.click(stopButton)
+  const stopDialog = screen.getByRole('dialog', {
+    name: 'Stop automatic handoff?',
+    description:
+      'Remaining bookings will not be processed. Their original bookings stay unchanged.',
+  })
+  const cancelStop = within(stopDialog).getByRole('button', { name: 'Cancel' })
+  expect(document.activeElement).toBe(cancelStop)
+  expect(api.to(CONTROL)).toHaveLength(2)
+  await user.click(cancelStop)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(stopButton)
+  expect(api.to(CONTROL)).toHaveLength(2)
+  await user.click(stopButton)
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(stopButton)
+  expect(api.to(CONTROL)).toHaveLength(2)
+  await user.click(stopButton)
+  await user.click(
+    within(screen.getByRole('dialog', { name: 'Stop automatic handoff?' })).getByRole('button', {
+      name: 'Stop',
+    }),
+  )
   const region = screen.getByRole('region', { name: 'Automatic handoff' })
   await within(region).findByText('Stopped', { selector: '[role="status"] p' })
   expect(within(region).getByRole('list').textContent).toContain('Proposal version 2 · Stopped')
   expect(within(region).queryByRole('button', { name: 'Resume' })).toBeNull()
   expect(within(region).queryByRole('button', { name: 'Stop' })).toBeNull()
   await user.click(within(region).getByRole('button', { name: start }))
+  await confirmStart(user)
   await within(region).findByRole('alert')
   expect(within(region).getByRole('list').textContent).toContain('Proposal version 2 · Stopped')
   await user.click(within(region).getByRole('button', { name: 'Refresh run receipt' }))
@@ -168,6 +218,7 @@ it('recovers an uncertain start with the same run ID and displays an applied ite
   })
   const view = panel()
   await user.click(await screen.findByRole('button', { name: start }))
+  await confirmStart(user)
   await screen.findByRole('alert')
   view.unmount()
   panel()
@@ -175,6 +226,7 @@ it('recovers an uncertain start with the same run ID and displays an applied ite
     'Could not confirm that automatic handoff started.',
   )
   await user.click(screen.getByRole('button', { name: start }))
+  await confirmStart(user)
   await screen.findByText('Running')
   expect(random).toHaveBeenCalledTimes(1)
   expect(api.to(START).map(({ body }) => body)).toEqual([
@@ -201,10 +253,12 @@ it('reports the start cooldown and removes write actions when the team binding c
   })
   panel({ reload })
   await user.click(await screen.findByRole('button', { name: start }))
+  await confirmStart(user)
   expect((await screen.findByRole('alert')).textContent).toBe(
     'Wait at least one minute between starting handoff runs.',
   )
   await user.click(screen.getByRole('button', { name: start }))
+  await confirmStart(user)
   await screen.findByText('Your team context changed. Reload before making changes.')
   expect(screen.queryByRole('button', { name: start })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Refresh run receipt' })).toBeNull()

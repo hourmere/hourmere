@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
-import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
+import { isOrganizationContextChanged, RequestError, requestError } from '../../api/errors.ts'
 import { zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
@@ -96,6 +96,23 @@ function failureMessage(error: unknown, action: Action['type']): MessageKey {
   return 'Could not verify the proposal change. Refresh handoff before trying again.'
 }
 
+function readResendKey(attempt: string) {
+  try {
+    return sessionStorage.getItem(attempt)
+  } catch {
+    return null
+  }
+}
+
+function saveResendKey(attempt: string, key: string | null) {
+  try {
+    if (key) sessionStorage.setItem(attempt, key)
+    else sessionStorage.removeItem(attempt)
+  } catch {
+    // The open view can still retry with its in-memory key.
+  }
+}
+
 export function BookingHandoff({
   bookingId,
   departingHost,
@@ -108,7 +125,7 @@ export function BookingHandoff({
   onApplied,
 }: {
   bookingId: string
-  departingHost: { name: string; userId: string } | undefined
+  departingHost: { name: string; userId: string; isCurrentMember: boolean | null } | undefined
   bookerAttendeeId: string | undefined
   expectedOrganizationId: string
   timeZone: string
@@ -122,6 +139,7 @@ export function BookingHandoff({
   const confirmationId = useId()
   const status = useRef<HTMLElement>(null)
   const operation = useRef<AbortController | null>(null)
+  const pendingResendKeys = useRef(new Map<string, string>())
   const moveFocus = useRef(false)
   const dialogTrigger = useRef<HTMLButtonElement | null>(null)
   const [busy, setBusy] = useState<Action['type'] | null>(null)
@@ -275,16 +293,27 @@ export function BookingHandoff({
             }),
           )
         } else if (action.type === 'resend') {
-          await unwrap(
-            api.POST('/api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend', {
+          const attempt = `hourmere:departure-handoff-resend:${offer.id}:${offer.version}:${action.recipientId}`
+          const key =
+            pendingResendKeys.current.get(attempt) ?? readResendKey(attempt) ?? crypto.randomUUID()
+          pendingResendKeys.current.set(attempt, key)
+          saveResendKey(attempt, key)
+          const { response, error } = await api.POST(
+            '/api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend',
+            {
               params: {
                 ...offerParams,
-                header: { ...offerParams.header, 'idempotency-key': crypto.randomUUID() },
+                header: { ...offerParams.header, 'idempotency-key': key },
               },
               body: { ...body, recipientId: action.recipientId },
               signal,
-            }),
+            },
           )
+          if (response.ok || (response.status >= 400 && response.status < 500)) {
+            pendingResendKeys.current.delete(attempt)
+            saveResendKey(attempt, null)
+          }
+          if (!response.ok) throw requestError(response.status, error)
         }
       }
       if (!signal.aborted) await refresh(signal)
@@ -443,6 +472,7 @@ export function BookingHandoff({
         <ProposalDraft
           key={offer?.version ?? 0}
           hostName={departingHost.name}
+          hostIsCurrentMember={departingHost.isCurrentMember}
           timeZone={format.timeZone}
           newVersion={Boolean(offer)}
           disabled={!canCreate || Boolean(busy)}

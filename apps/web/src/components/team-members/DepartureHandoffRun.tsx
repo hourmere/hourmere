@@ -1,4 +1,8 @@
 import {
+  DEPARTURE_HANDOFF_ITEM_GAP_SECONDS,
+  MAX_DEPARTURE_HANDOFF_RUN_ITEMS,
+} from '@hourmere/core/departure-handoff-run'
+import {
   type MouseEvent,
   useCallback,
   useEffect,
@@ -14,12 +18,14 @@ import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
+import { ConfirmationDialog } from '../ConfirmationDialog.tsx'
 import './DepartureHandoffRun.css'
 
 type Booking = Schemas['TeamAdminBookingDetail']
 type Run = Schemas['DepartureHandoffRun']
 type Control = 'pause' | 'resume' | 'stop'
 type Action = Control | 'start' | 'refresh'
+type PendingConfirmation = { action: 'start' | 'stop'; run: Run | null }
 type SavedRun = { id: string; started: boolean; previousId?: string }
 
 const runPath = '/api/v1/team/bookings/handoff-runs/{runId}'
@@ -172,7 +178,6 @@ function DepartureHandoffRun({
 }) {
   const { t } = useI18n()
   const headingId = useId()
-  const instructionsId = useId()
   const Heading = inRemovalReview ? 'h4' : 'h3'
   const ReceiptHeading = inRemovalReview ? 'h5' : 'h4'
   const storageKey = `hourmere:departure-handoff-run:${viewerUserId}:${organizationId}:${host.userId}`
@@ -182,6 +187,7 @@ function DepartureHandoffRun({
   const [issue, setIssue] = useState<MessageKey | null>(null)
   const [blocked, setBlocked] = useState(false)
   const [hidden, setHidden] = useState(false)
+  const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null)
   const operation = useRef<AbortController | null>(null)
   const feedback = useRef<HTMLDivElement>(null)
   const opener = useRef<HTMLButtonElement | null>(null)
@@ -275,8 +281,7 @@ function DepartureHandoffRun({
     }
   }, [execute, storageKey])
 
-  function handle(action: Action, event: MouseEvent<HTMLButtonElement>) {
-    if (blocked || busy || operation.current) return
+  function submit(action: Action) {
     const entry =
       action === 'start'
         ? saved && !saved.started
@@ -284,24 +289,35 @@ function DepartureHandoffRun({
           : { id: crypto.randomUUID(), started: false, ...(saved && { previousId: saved.id }) }
         : saved
     if (!entry) return
-    opener.current = event.currentTarget
     void execute(action, entry)
+  }
+
+  function handle(action: Action, event: MouseEvent<HTMLButtonElement>) {
+    if (blocked || busy || operation.current || confirmation) return
+    opener.current = event.currentTarget
+    if (action === 'start' || action === 'stop') {
+      setConfirmation({ action, run })
+      return
+    }
+    submit(action)
+  }
+
+  function closeConfirmation() {
+    setConfirmation(null)
+    if (opener.current?.isConnected) opener.current.focus()
+    else feedback.current?.focus()
   }
 
   if (hidden) return null
   const active = run?.state === 'running' || run?.state === 'paused'
   const canStart = !active && (!saved?.started || run !== null)
+  const stopping = confirmation?.action === 'stop'
 
   return (
     <section className="departure-handoff-run" aria-labelledby={headingId}>
       <Heading id={headingId}>{t('Automatic handoff')}</Heading>
       <p className="user-content">
         <bdi>{host.name.trim() || t('Unnamed team member')}</bdi>
-      </p>
-      <p id={instructionsId}>
-        {t(
-          'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.',
-        )}
       </p>
       <div ref={feedback} tabIndex={-1}>
         <div role="status">
@@ -330,7 +346,6 @@ function DepartureHandoffRun({
               <button
                 type="button"
                 className="button button-small"
-                aria-describedby={instructionsId}
                 aria-disabled={busy !== null}
                 onClick={(event) => handle('start', event)}
               >
@@ -385,6 +400,35 @@ function DepartureHandoffRun({
             ))}
           </ul>
         </>
+      )}
+      {confirmation && (
+        <ConfirmationDialog
+          heading={t(stopping ? 'Stop automatic handoff?' : 'Start automatic handoff?')}
+          description={
+            stopping
+              ? t(
+                  'Remaining bookings will not be processed. Their original bookings stay unchanged.',
+                )
+              : t(
+                  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.',
+                  {
+                    count: MAX_DEPARTURE_HANDOFF_RUN_ITEMS,
+                    seconds: DEPARTURE_HANDOFF_ITEM_GAP_SECONDS,
+                  },
+                )
+          }
+          confirmLabel={t(stopping ? 'Stop' : 'Start automatic handoff')}
+          destructive={stopping}
+          onCancel={() => {
+            closeConfirmation()
+            opener.current = null
+          }}
+          onConfirm={() => {
+            closeConfirmation()
+            if (blocked || busy || operation.current || confirmation.run !== run) return
+            submit(confirmation.action)
+          }}
+        />
       )}
     </section>
   )

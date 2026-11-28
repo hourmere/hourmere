@@ -313,11 +313,16 @@ disposable PostgreSQL databases and fake provider/mail transports.
 
 The browser and REST flows use the production PostgreSQL store. An authorized
 owner or admin opens the source in **Team bookings** and selects **Preview handoff**. The preview
-shows the proposed host, time and location type. **Create proposal** sends invitations for
+shows the proposed host, time and location type. The proposal form labels the saved host
+**Original host** while they are still a team member and **Departed host** after they leave.
+**Create proposal** sends invitations for
 an available preview with no existing proposal. An optional start time overrides the original
 time and is checked when the proposal is created. **Refresh handoff** shows the version,
 expiry, and the decision, delivery and resend status for each recipient, identified by
-their role. **Resend** and **Withdraw** require confirmation. **New version** opens
+their role. **Resend** and **Withdraw** require confirmation. If a resend result is uncertain,
+refresh handoff status before retrying. The same browser tab remembers the request key for
+that version and recipient until it receives a success or a definitive client error.
+**New version** opens
 a fresh proposal after decline, expiry or withdrawal. A slot judged unavailable on the current
 event grid, calendar uncertainty, a changed offer, any outstanding approval, or an expired
 offer prevents confirmation. An expired offer leaves the source intact. If a slot changed
@@ -433,8 +438,10 @@ another notice.
 
 After a host has left, a current team owner or administrator can open **Automatic handoff**
 from the departure review in **Team members**, or select **Manage automatic handoff** in an
-affected booking. Start the run for that host and use **Pause**, **Resume**, **Stop** and
-**Refresh run receipt** to control it and review the outcome of each booking.
+affected booking. Select **Start automatic handoff for this departed member**. The
+confirmation shows the ten-booking cap and the minimum ten seconds between bookings.
+Use **Pause** or **Resume** to control the run. **Stop** requires confirmation and leaves
+any remaining originals unchanged. Select **Refresh run receipt** to review each outcome.
 
 For the REST operation, pass a fresh UUID as `runId` and the former host's account ID as `departingUserId`
 to `POST /api/v1/team/bookings/handoff-runs`. Read the receipt at
@@ -467,10 +474,11 @@ manual recovery flow. Some bookings may have been outside the run or missing app
 Receipts are retained for seven days and contain only stored IDs, versions and status codes.
 The team journal records run starts, pauses, resumes and terminal transitions.
 
-中文：主持人离队后，当前团队所有者或管理员可显式启动一轮交接。每轮最多处理十笔
+中文：主持人离队后，当前团队所有者或管理员可确认启动一轮自动交接。每轮最多处理十笔
 已经获得全部参与者同意的有效提议，逐笔提交，间隔至少十秒。同一团队同时只能有一轮运行或暂停，
 新一轮启动间隔至少一分钟。每轮有三十分钟期限，包含暂停时间。用同一运行编号重试启动会取回
-原回执。暂停或停止会在下一笔前生效。请从同一团队当前有权限的会话恢复已暂停的队列。
+原回执。暂停或停止会在下一笔前生效。停止需要确认，尚未处理的原预约保持不变。
+请从同一团队当前有权限的会话恢复已暂停的队列。
 运行绑定启动或最近一次恢复的会话。该会话切换团队或结束时，下一笔到期处理会导致
 `authorization_lost`，本轮失败。请用当前会话在启动间隔满足后，为其余合格提议开启新一轮。
 原主持人重新加入团队时，本轮也会停止。请逐笔查看回执，用原有单笔交接或人工

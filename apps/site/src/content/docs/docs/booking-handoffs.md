@@ -21,7 +21,8 @@ acceptance is complete. See [Configuration reference](/docs/configuration#server
 1. In the team space, repair the event type so the intended replacement is its sole host.
    Check the host's working hours and eligible meeting or calendar connection.
 2. Open **Team bookings**, select the original booking and choose **Preview handoff**.
-   Check the departing host, replacement host, time and location type. When the preview shows
+   Check the saved host, replacement host, time and location type. The proposal form shows
+   **Original host** for a current member and **Departed host** after they leave. When the preview shows
    an available slot and there is no existing proposal, select **Create proposal**.
    If you enter a different start time, Hourmere checks that time when creating the proposal.
    The proposal reserves no time.
@@ -29,7 +30,8 @@ acceptance is complete. See [Configuration reference](/docs/configuration#server
    decision and link delivery status. The deadline is at most 48 hours after issuance
    and no later than the original or proposed start, whichever comes first.
 4. Confirm **Resend** beside a recipient whose link can be resent, or confirm **Withdraw**
-   to close the whole version. After a decline, expiry or withdrawal, choose **New version**
+   to close the whole version. If a resend result is unclear, refresh handoff status before
+   retrying for the same recipient and version in the same tab. After a decline, expiry or withdrawal, choose **New version**
    to request fresh decisions. You can set a different start for the new version.
 5. When the booker and every guest have approved the same version and the slot is available,
    select **Confirm handoff**.
@@ -48,8 +50,10 @@ or a participant cannot respond, coordinate rebooking directly with them.
 
 After removing the host from **Team members**, use **Automatic handoff** in the departure
 review. You can also open an affected booking and select **Manage automatic handoff**.
-Select **Start automatic handoff for this departed member**. Use **Pause**, **Resume**
-or **Stop** to manage the run. Select **Refresh run receipt** to see each booking's result.
+Select **Start automatic handoff for this departed member** and confirm. The dialog shows the
+ten-booking cap and the minimum ten seconds between bookings. Use **Pause** or **Resume** to
+manage the run. Confirm **Stop** to leave the remaining original bookings unchanged.
+Select **Refresh run receipt** to see each booking's result.
 
 An automatic run starts only when a current owner or admin explicitly requests it after the
 host has left. It selects up to ten live, fully approved versions, in earliest-expiry order.
@@ -108,10 +112,12 @@ Version history, committed receipts and the source-specific hashed send counts f
 
 1. 团队所有者或管理员先修复活动类型，将符合资格的接任者设为唯一主持人。仅支持尚未开始且已确认的
    团队单人模式预约。团体、集体、轮询、导入、重复、关联会议投票、来自路由表单，以及带付款记录或手动会议链接的预约均不支持交接。
-2. 打开**团队预约**，选择原预约，再点**试算交接**。核对离队主持人、接任主持人、时间和地点类型。
+2. 打开**团队预约**，选择原预约，再点**试算交接**。核对原主持人、接任主持人、时间和地点类型。
+   提议表单会将仍在团队的人标为**原主持人**，将已离队的人标为**已离队的主持人**。
    如需改期，可填写拟议开始时间。时段可用且没有现有提议时，点**创建提议**。试算和提议都不会占用时段。
 3. 点**刷新交接状态**，查看版本、截止时间，以及每位预订人或来宾的决定、投递状态和可重发状态。
-   有人需要新链接时，在对应行点**重发**并确认。要关闭整个版本，点**撤回**并确认。提议被拒绝、过期或撤回后，
+   有人需要新链接时，在对应行点**重发**并确认。若重发结果不明确，先刷新交接状态，再在同一标签页重试相同版本和收件人。
+   要关闭整个版本，点**撤回**并确认。提议被拒绝、过期或撤回后，
    可点**新版本**并按需修改开始时间。换版会使旧链接和同意失效，每人都须重新回复。
 4. 预订人和每个不同邮箱的来宾都要打开各自最新邮件里的私密链接。核对**当前预约**和**拟议预约**，
    选择**接受**或**拒绝**，然后点**提交决定**。预订人还可查看会共享给新主持人的已保存回答。
@@ -126,7 +132,8 @@ Version history, committed receipts and the source-specific hashed send counts f
 旧链接失效。达到发送上限后，请与参与者协调重新预约。
 
 在**团队成员**移除主持人后，在离队审查中打开**自动交接**。也可以打开受影响的预约，点**管理自动交接**。
-点**为这位已离队成员启动自动交接**，用**暂停**、**恢复**、**停止**控制队列，点**刷新运行回执**查看逐笔结果。
+点**为这位已离队成员启动自动交接**并确认。用**暂停**、**恢复**控制队列。点**停止**并确认后，尚未处理的原预约保持不变。
+点**刷新运行回执**查看逐笔结果。
 自动队列只处理已获全员同意的有效提议。每轮最多十笔，逐笔处理间隔
 至少十秒。同一团队同时只能有一轮运行或暂停，新一轮启动间隔至少一分钟，每轮最长三十分钟，包含暂停时间。
 暂停或停止在处理下一笔前生效。暂停后可由当前有权限的会话恢复。运行绑定启动或最近一次恢复的会话，
@@ -149,7 +156,7 @@ Version history, committed receipts and the source-specific hashed send counts f
 3. 让预订人在私密链接中点**接受**和**提交决定**。返回原预约点**刷新交接状态**，核对有来宾未答复时
    **确认交接**不可用。让来宾点**拒绝**和**提交决定**，刷新后填入新的**开始时间**并点**新版本**。
    两人分别从新邮件打开链接并同意。回到原预约刷新，核对**确认交接**可用。
-4. 在一笔已获全员同意的原预约上点**管理自动交接**，再点**为这位已离队成员启动自动交接**。
+4. 在一笔已获全员同意的原预约上点**管理自动交接**，再点**为这位已离队成员启动自动交接**并确认。
    随即点**暂停**，查看待处理回执，再点**恢复**。点**刷新运行回执**，查看逐笔结果并点**查看新预约**。
-5. 对另一笔已获全员同意的提议，等启动间隔后启动新一轮，随即点**停止**。刷新运行回执，核对尚未处理的预约已停止。
+5. 对另一笔已获全员同意的提议，等启动间隔后启动新一轮，随即点**停止**并确认。刷新运行回执，核对尚未处理的预约已停止。
    回到原预约，点**刷新交接状态**，再点**撤回**并确认，核对提议已撤回且原预约仍保持确认。

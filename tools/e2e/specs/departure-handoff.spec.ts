@@ -285,6 +285,16 @@ async function openSourceBooking(page: Page, removal: Locator) {
   return handoff
 }
 
+async function confirmAutomaticHandoffStart(page: Page, start: Locator) {
+  await start.click()
+  const dialog = page.getByRole('dialog', { name: 'Start automatic handoff?' })
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await expect(dialog).toContainText(
+    'This run processes up to 10 fully approved bookings, with at least 10 seconds between bookings. You can pause or stop it.',
+  )
+  await dialog.getByRole('button', { name: 'Start automatic handoff', exact: true }).click()
+}
+
 async function openParticipantContext(browser: Browser, url: string) {
   const participant = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block' })
   await participant.route('**/*', (route) =>
@@ -357,7 +367,7 @@ test.describe('departure handoff acceptance', () => {
     const start = queue.getByRole('button', {
       name: 'Start automatic handoff for this departed member',
     })
-    await start.click()
+    await confirmAutomaticHandoffStart(page, start)
     await expect(queue.getByRole('alert')).toContainText(
       'No fully approved proposals are eligible for automatic handoff.',
     )
@@ -372,6 +382,7 @@ test.describe('departure handoff acceptance', () => {
     const refresh = region.getByRole('button', { name: 'Refresh handoff' })
     await expect(region.locator('dd').getByText('Replacement host', { exact: true })).toBeVisible()
     await expect(region.locator('dd').getByText('Departing host', { exact: true })).toBeVisible()
+    await expect(region.locator('dt').getByText('Departed host', { exact: true })).toBeVisible()
     await region.getByRole('button', { name: 'Create proposal' }).click()
     await expect(proposal.getByText('Version 1', { exact: true })).toBeVisible()
     await expect(proposal.getByText('Expires at', { exact: true })).toBeVisible()
@@ -429,7 +440,7 @@ test.describe('departure handoff acceptance', () => {
       await expect(confirm).toBeEnabled()
 
       await page.getByRole('link', { name: 'Manage automatic handoff' }).click()
-      await start.click()
+      await confirmAutomaticHandoffStart(page, start)
       await expect(queue.getByRole('status')).toContainText('Running')
       const receipt = queue.getByRole('list')
       await expect(queue.getByRole('heading', { name: 'Run receipt' })).toBeVisible()
@@ -586,11 +597,24 @@ test('the administrator can resend individual links, stop a run and withdraw thr
   await expect(handoffStatus(region)).toContainText('All participants have approved.')
   await page.getByRole('link', { name: 'Manage automatic handoff' }).click()
   const queue = page.getByRole('region', { name: 'Automatic handoff' })
-  await queue
-    .getByRole('button', { name: 'Start automatic handoff for this departed member' })
-    .click()
+  await confirmAutomaticHandoffStart(
+    page,
+    queue.getByRole('button', { name: 'Start automatic handoff for this departed member' }),
+  )
   await expect(queue.getByRole('status')).toContainText('Running')
-  await queue.getByRole('button', { name: 'Stop', exact: true }).click()
+  const stop = queue.getByRole('button', { name: 'Stop', exact: true })
+  await stop.click()
+  const stopDialog = page.getByRole('dialog', { name: 'Stop automatic handoff?' })
+  await expect(stopDialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await expect(stopDialog).toContainText(
+    'Remaining bookings will not be processed. Their original bookings stay unchanged.',
+  )
+  await page.keyboard.press('Escape')
+  await expect(stopDialog).toBeHidden()
+  await expect(stop).toBeFocused()
+  await expect(queue.getByRole('status')).toContainText('Running')
+  await stop.click()
+  await stopDialog.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect(queue.getByRole('status')).toContainText('Stopped')
   await expect(queue.getByRole('heading', { name: 'Run receipt' })).toBeVisible()
   const receipt = queue.getByRole('list')

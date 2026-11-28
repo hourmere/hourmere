@@ -390,6 +390,26 @@ describe('team booking handoff', () => {
     }
   })
 
+  it.each([
+    { isCurrentMember: true, label: 'Original host' },
+    { isCurrentMember: false, label: 'Departed host' },
+    { isCurrentMember: null, label: 'Original host' },
+  ])('labels the saved host as $label', async ({ isCurrentMember, label }) => {
+    server({
+      [GET]: () =>
+        json(200, {
+          ...handoffBooking,
+          hosts: [{ ...BOOKING.hosts[0], isCurrentMember }],
+        }),
+      [HANDOFF_PREVIEW]: () => json(200, { offer: null, preview, receipt: null }),
+    })
+    open()
+    const handoff = within(await screen.findByRole('region', { name: 'Booking handoff' }))
+    await userEvent.click(handoff.getByRole('button', { name: 'Preview handoff' }))
+    const host = await handoff.findByText(label, { selector: 'dt' })
+    expect(host.nextElementSibling?.textContent).toBe('Saved host')
+  })
+
   it('creates, resends and withdraws proposals with role-only status and a versioned restart', async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
     try {
@@ -553,6 +573,67 @@ describe('team booking handoff', () => {
       await refresh()
       await handoff.findByText('Version 3')
       expect(handoff.queryByRole('button', { name: 'Create proposal' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { outcome: 'network failure', status: null, replay: true },
+    { outcome: 'server error', status: 503, replay: true },
+    { outcome: 'definite rejection', status: 409, replay: false },
+  ])('handles a resend retry after a $outcome', async ({ status, replay }) => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
+    try {
+      let attempts = 0
+      const calls = server({
+        [GET]: () => json(200, handoffBooking),
+        [HANDOFF_PREVIEW]: () =>
+          json(200, { offer: { ...offer, state: 'pending' }, preview, receipt: null }),
+        [HANDOFF_STATUS]: () => json(200, pending),
+        [HANDOFF_RESEND]: () => {
+          attempts += 1
+          if (attempts > 1) return json(200, pending)
+          if (status === null) throw new TypeError('Failed to fetch')
+          return json(status, { error: 'unavailable' })
+        },
+      })
+      const user = userEvent.setup()
+      async function resend(role: 'Booker' | 'Guest') {
+        const recipient = within(await screen.findByRole('article', { name: role }))
+        await user.click(recipient.getByRole('button', { name: 'Resend' }))
+        const dialog = within(screen.getByRole('dialog', { name: 'Resend proposal link?' }))
+        await user.click(dialog.getByRole('button', { name: 'Resend' }))
+      }
+
+      const page = open()
+      await user.click(await screen.findByRole('button', { name: 'Preview handoff' }))
+      await resend('Guest')
+      await screen.findByText(
+        'Could not verify the proposal change. Refresh handoff before trying again.',
+      )
+
+      page.unmount()
+      open()
+      await user.click(await screen.findByRole('button', { name: 'Preview handoff' }))
+      await resend('Booker')
+      await screen.findByText('Proposal link queued.')
+      await resend('Guest')
+      await screen.findByText('Proposal link queued.')
+
+      const requests = calls.to(HANDOFF_RESEND)
+      expect(requests.map((request) => request.body)).toEqual([
+        { version: offer.version, recipientId: guestRecipientId },
+        { version: offer.version, recipientId: bookerRecipientId },
+        { version: offer.version, recipientId: guestRecipientId },
+      ])
+      const [first, otherRecipient, retry] = requests.map(({ headers }) =>
+        headers.get('Idempotency-Key'),
+      )
+      for (const key of [first, otherRecipient, retry]) expect(key).toMatch(/^[0-9a-f-]{36}$/)
+      expect(otherRecipient).not.toBe(first)
+      if (replay) expect(retry).toBe(first)
+      else expect(retry).not.toBe(first)
     } finally {
       vi.useRealTimers()
     }

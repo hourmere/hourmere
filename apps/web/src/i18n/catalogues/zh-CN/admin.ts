@@ -3692,4 +3692,15 @@ export const admin = {
     '无法更新自动交接。请刷新运行回执后重试。',
   'Could not load the run receipt. Try refreshing it.': '无法加载运行回执。请尝试刷新。',
   'The automatic handoff queue is temporarily unavailable.': '自动交接队列暂时不可用。',
+
+  // Departure handoff confirmations and host labels
+  'Original host': '原主持人',
+  'Departed host': '已离队的主持人',
+  'Start automatic handoff?': '启动自动交接？',
+  'Stop automatic handoff?': '停止自动交接？',
+  'Start automatic handoff': '启动自动交接',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    '本轮最多处理 {count} 笔已获全员同意的预约，每笔之间至少间隔 {seconds} 秒。你可以暂停或停止本轮交接。',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    '尚未处理的预约将停止交接，相应的原预约保持不变。',
 } as const

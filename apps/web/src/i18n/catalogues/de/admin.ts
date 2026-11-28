@@ -457,4 +457,15 @@ export const admin = {
   Completed: 'Abgeschlossen',
   Failed: 'Fehlgeschlagen',
   Pending: 'Ausstehend',
+
+  // Departure handoff confirmations and host labels
+  'Original host': 'Ursprünglicher Gastgeber',
+  'Departed host': 'Ausgeschiedener Gastgeber',
+  'Start automatic handoff?': 'Automatische Übergabe starten?',
+  'Stop automatic handoff?': 'Automatische Übergabe stoppen?',
+  'Start automatic handoff': 'Automatische Übergabe starten',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    'In diesem Lauf werden bis zu {count} Buchungen verarbeitet, denen alle zugestimmt haben. Zwischen den Buchungen liegen mindestens {seconds} Sekunden. Du kannst den Lauf pausieren oder stoppen.',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    'Die verbleibenden Buchungen werden nicht verarbeitet. Die ursprünglichen Buchungen bleiben unverändert.',
 }

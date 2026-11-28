@@ -1,5 +1,6 @@
-import { type MouseEvent, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type MouseEvent, useId, useRef, useState } from 'react'
 import type { Schemas } from '../../api/client.ts'
+import { ConfirmationDialog } from '../../components/ConfirmationDialog.tsx'
 import { Field } from '../../components/forms.tsx'
 import type { zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -59,12 +60,14 @@ function selectedStart(value: string, timeZone: string): string | undefined {
 
 export function ProposalDraft({
   hostName,
+  hostIsCurrentMember,
   timeZone,
   newVersion,
   disabled,
   onSubmit,
 }: {
   hostName: string
+  hostIsCurrentMember: boolean | null
   timeZone: string
   newVersion: boolean
   disabled: boolean
@@ -91,7 +94,7 @@ export function ProposalDraft({
       }}
     >
       <dl className="details">
-        <dt>{t('Departing host')}</dt>
+        <dt>{t(hostIsCurrentMember === false ? 'Departed host' : 'Original host')}</dt>
         <dd>
           <bdi>{hostName}</bdi>
         </dd>
@@ -240,59 +243,20 @@ export function ProposalConfirmation({
   onConfirm: () => void
 }) {
   const { t } = useI18n()
-  const headingId = useId()
-  const descriptionId = useId()
-  const dialog = useRef<HTMLDialogElement>(null)
-  const cancel = useRef<HTMLButtonElement>(null)
   const withdrawing = action.type === 'withdraw'
-  useLayoutEffect(() => {
-    const element = dialog.current
-    if (!element) return
-    if (typeof element.showModal === 'function') element.showModal()
-    else element.setAttribute('open', '')
-    cancel.current?.focus()
-    return () => element.close?.()
-  }, [])
-
-  function close(next: () => void) {
-    dialog.current?.close?.()
-    next()
-  }
 
   return (
-    <dialog
-      ref={dialog}
-      className="one-time-link-dialog"
-      aria-labelledby={headingId}
-      aria-describedby={descriptionId}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') event.stopPropagation()
-      }}
-      onCancel={(event) => {
-        event.preventDefault()
-        close(onCancel)
-      }}
-    >
-      <h2 id={headingId}>{t(withdrawing ? 'Withdraw proposal?' : 'Resend proposal link?')}</h2>
-      <p id={descriptionId}>
-        {t(
-          withdrawing
-            ? 'Withdrawing revokes all links for this version. The original booking stays confirmed.'
-            : 'Sending a new link replaces the recipient’s previous link.',
-        )}
-      </p>
-      <div className="form-actions">
-        <button type="button" className="button" ref={cancel} onClick={() => close(onCancel)}>
-          {t('Cancel')}
-        </button>
-        <button
-          type="button"
-          className={withdrawing ? 'button button-danger' : 'button button-primary'}
-          onClick={() => close(onConfirm)}
-        >
-          {t(withdrawing ? 'Withdraw' : 'Resend')}
-        </button>
-      </div>
-    </dialog>
+    <ConfirmationDialog
+      heading={t(withdrawing ? 'Withdraw proposal?' : 'Resend proposal link?')}
+      description={t(
+        withdrawing
+          ? 'Withdrawing revokes all links for this version. The original booking stays confirmed.'
+          : 'Sending a new link replaces the recipient’s previous link.',
+      )}
+      confirmLabel={t(withdrawing ? 'Withdraw' : 'Resend')}
+      destructive={withdrawing}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   )
 }

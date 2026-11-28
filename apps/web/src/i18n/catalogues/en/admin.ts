@@ -3872,4 +3872,15 @@ export const admin = {
     'Could not load the run receipt. Try refreshing it.',
   'The automatic handoff queue is temporarily unavailable.':
     'The automatic handoff queue is temporarily unavailable.',
+
+  // Departure handoff confirmations and host labels
+  'Original host': 'Original host',
+  'Departed host': 'Departed host',
+  'Start automatic handoff?': 'Start automatic handoff?',
+  'Stop automatic handoff?': 'Stop automatic handoff?',
+  'Start automatic handoff': 'Start automatic handoff',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    'Remaining bookings will not be processed. Their original bookings stay unchanged.',
 } as const

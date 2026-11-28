@@ -453,4 +453,15 @@ export const admin = {
   Completed: 'Terminé',
   Failed: 'Échec',
   Pending: 'En attente',
+
+  // Departure handoff confirmations and host labels
+  'Original host': 'Hôte d’origine',
+  'Departed host': 'Hôte ayant quitté l’équipe',
+  'Start automatic handoff?': 'Démarrer le transfert automatique ?',
+  'Stop automatic handoff?': 'Arrêter le transfert automatique ?',
+  'Start automatic handoff': 'Démarrer le transfert automatique',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    'Ce transfert traite jusqu’à {count} réservations approuvées par tous, avec au moins {seconds} secondes entre deux réservations. Vous pouvez le suspendre ou l’arrêter.',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    'Les réservations restantes ne seront pas traitées. Les réservations d’origine correspondantes resteront inchangées.',
 }
