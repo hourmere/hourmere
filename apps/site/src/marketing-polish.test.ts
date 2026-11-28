@@ -196,7 +196,7 @@ describe('legal navigation and print polish', () => {
       expect(hasReturnLink, heading.id).toBe(true)
     }
     expect(document(legal).querySelector('nav#contents.toc')).not.toBeNull()
-    expect(declarations(legal, '.prose :global(.back-to-contents a)')['min-height']).toBe('44px')
+    expect(declarations(legal, '.prose :global(.back-to-contents a)')['min-height']).toBe('2.75rem')
   })
 
   it('uses the light palette for print even with a stored dark theme', () => {

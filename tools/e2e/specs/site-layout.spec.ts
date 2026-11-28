@@ -7,6 +7,27 @@ import { expect, test } from '../site-fixtures.ts'
 // Real-browser geometry belongs to CI. Local runs need an explicitly escalated shell.
 test.skip(!process.env.CI, 'Static-site rendering regression runs in CI')
 
+for (const path of ['/privacy', '/terms']) {
+  test(`${path} preserves its default legal layout sizes`, async ({
+    page,
+    siteOrigin,
+  }, testInfo) => {
+    await open(page, siteOrigin, path)
+    const article = page.locator('article.legal')
+    const narrow = testInfo.project.name === 'site-mobile'
+    await expect(page.locator('html')).toHaveCSS('font-size', '16px')
+    await expect(article).toHaveCSS('width', narrow ? '360px' : '800px')
+    await expect(article).toHaveCSS('padding-block', '56px 80px')
+    await expect(article.locator('h1')).toHaveCSS('font-size', narrow ? '34px' : '46px')
+    await expect(article.locator('.eyebrow')).toHaveCSS('font-size', '14px')
+    await expect(article.locator('.effective').first()).toHaveCSS('font-size', '17px')
+    await expect(article.locator('.callout').first()).toHaveCSS('padding', '16px 20px')
+    await expect(article.locator('.prose > h2').first()).toHaveCSS('font-size', '26px')
+    await expect(article.locator('.toc ol')).toHaveCSS('column-width', '240px')
+    await expect(article.locator('.back-to-contents a').first()).toHaveCSS('min-height', '44px')
+  })
+}
+
 // Every published documentation page whose Markdown holds a table. The route drops the
 // extension, and index.md is the /docs landing page.
 function pagesWithTables() {
