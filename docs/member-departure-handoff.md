@@ -279,7 +279,7 @@ disposable PostgreSQL databases and fake provider/mail transports.
 ### Staged administrator flow
 
 The production server keeps handoff admission off. The staged browser and REST acceptance
-flow exercises the production PostgreSQL store with seeded offers and consent records. An authorized
+flow exercises the production PostgreSQL store. An authorized
 owner or admin opens the source in Team bookings and selects **Preview handoff**. The preview
 shows the proposed host, time and location type. A slot judged unavailable on the current
 event grid, calendar uncertainty, a changed offer, any outstanding approval, or an expired
@@ -301,9 +301,29 @@ The staged GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
 consent state and deadline, or the limited committed receipt. The production assembly
 leaves the detail capability absent and returns `handoffs_disabled` to authorized callers.
 
-Production storage is in place. Proposal lifecycle and confirmation-link delivery, recipient
-decisions and transports, handoff-specific messages and calendar attachments, and rollout
-remain pending.
+The staged administrator API can create and inspect proposals, withdraw a version, and resend
+one pending recipient’s link. Create with the departing host ID and optional start, duration
+and location choice. Pass the latest offer ID and version in `previous` to replace the terms.
+The offer ID stays the same and the version advances. The previous version and its links
+become inactive, and the new version requires every recipient’s fresh approval. Use the
+optional `version` query parameter to inspect a specific historical version. Recipient
+status includes the matching source booking attendee IDs for selecting whom to contact.
+
+Send the version and opaque recipient ID to resend, with a random UUID in the
+`Idempotency-Key` header. Retry the same recipient and version with the same key. The
+worker rotates the link when it claims a new attempt. The first send and attempts with
+uncertain delivery count toward the three-send cap per source booking and normalized mailbox.
+An unavailable mailer or a shared-mail limit leaves the attempt unsent and preserves any
+previously active link. A queued attempt that has not been claimed within 20 minutes can
+be replaced by a fresh resend request. If SMTP was already in flight when an offer was
+withdrawn or superseded, the recipient may still receive a message whose link is revoked.
+
+Recipient decision endpoints and pages, handoff-specific replacement notifications and
+calendar attachments, and rollout remain pending.
+
+中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
+同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
+`Idempotency-Key`。撤回、过期或换版都会使旧链接失效，源预约仍保持确认。生产环境保持关闭。
 Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
 exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
 open. Bounded automatic handoff is a separate follow-on.

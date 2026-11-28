@@ -303,6 +303,10 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}/handoff-preview` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers` | Browser session only | — |
+| `GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` | Browser session only | — |
 | `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm` | Browser session only | — |

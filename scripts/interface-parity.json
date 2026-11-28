@@ -180,6 +180,18 @@
     "exemption": "invitee-checkout",
     "reason": "Paid admission hands off to Stripe Checkout and returns to the original invitee browser tab."
   },
+  "createDepartureHandoffProposal": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin proposes replacement terms and dispatches private links from the browser."
+  },
+  "withdrawDepartureHandoffProposal": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin withdraws a version and revokes its links from the browser."
+  },
+  "resendDepartureHandoffProposal": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin can explicitly request another private link from the browser."
+  },
   "applyDepartureHandoff": {
     "exemption": "browser-session-only",
     "reason": "A current team owner or admin must explicitly confirm the participant-approved booking replacement in a browser session."

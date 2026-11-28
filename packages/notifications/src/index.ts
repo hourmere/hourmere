@@ -1,6 +1,13 @@
 import { sendRescheduleRequestNotification } from './reschedule-request.ts'
 import { enqueueBookingSmsReminders, type SmsReminderQueue } from './sms-reminders.ts'
 
+export {
+  createDepartureHandoffEmailQueue,
+  DEPARTURE_HANDOFF_EMAIL_JOB,
+  deliverDepartureHandoffEmail,
+  departureHandoffCleanupJob,
+  departureHandoffEmailJob,
+} from './departure-handoff.ts'
 export { rescheduleRequestExpiryJob } from './reschedule-request.ts'
 
 // Booking notifications (https://hourmere.com/docs/notifications): the job that emails attendees and hosts
