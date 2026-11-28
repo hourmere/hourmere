@@ -12,6 +12,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
@@ -28,7 +29,7 @@ import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { isKnownTimeZone, zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import { msg, type UiText } from '../../i18n/translate.ts'
+import { type MessageKey, msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
 import { offsetAt, wallTime } from '../../public/time.ts'
@@ -40,10 +41,18 @@ import { BookingExport } from '../bookings/BookingExport.tsx'
 import { BookingPanel, useBookingPanel, useBookingPanelTitle } from '../bookings/BookingPanel.tsx'
 import { hostZone } from '../bookings/booking-format.ts'
 import { ManualRebooking } from './ManualRebooking.tsx'
+import {
+  BulkCancellationCounts,
+  BulkCancellationDialog,
+  bulkResultTitle,
+} from './TeamBookingBulkCancellation.tsx'
 import { TeamBookingDetailPage } from './TeamBookingDetail.tsx'
+import { MAX_BULK_SELECTION, useBulkBookingSelection } from './useBulkBookingSelection.ts'
+import { useBulkCancellationReceipt } from './useBulkCancellationReceipt.ts'
 
 type Booking = Schemas['TeamAdminBooking']
 type BookingPage = Schemas['TeamAdminBookingPage']
+type LoadedBookingPages = BookingPage & { activePage: BookingPage }
 type Tab = 'upcoming' | 'past' | 'all'
 type Query = {
   from?: string
@@ -227,6 +236,13 @@ function TeamBookingContent({
   const [params, setParams] = useSearchParams()
   const [conflict, setConflict] = useState<{ error: unknown; params: URLSearchParams } | null>(null)
   const displayedParams = conflict?.params ?? params
+  const onConflict = useCallback(
+    (error: unknown) => {
+      reportContextChanged(error)
+      setConflict((current) => current ?? { error, params: new URLSearchParams(params) })
+    },
+    [params, reportContextChanged],
+  )
   const tab: Tab =
     displayedParams.get('tab') === 'past'
       ? 'past'
@@ -279,10 +295,7 @@ function TeamBookingContent({
         expectedOrganizationId={expectedOrganizationId}
         onRevoked={onRevoked}
         conflict={conflict?.error ?? null}
-        onConflict={(error) => {
-          reportContextChanged(error)
-          setConflict({ error, params: new URLSearchParams(displayedParams) })
-        }}
+        onConflict={onConflict}
       />
     </>
   )
@@ -451,8 +464,9 @@ function BookingList({
 }) {
   const { t, ui, formatLocale } = useI18n()
   const panel = useBookingPanel()
+  const { organization, user } = useMe()
   const loadedPages = useRef(1)
-  const loadedSnapshot = useRef<BookingPage | null>(null)
+  const loadedSnapshot = useRef<LoadedBookingPages | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<UiText | null>(null)
   const [query] = useState<Query>(() => {
@@ -476,51 +490,143 @@ function BookingList({
       limit: PAGE_SIZE,
     }
   })
+  const moreController = useRef<AbortController | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const handleConflict = useCallback(
+    (error: unknown) => {
+      moreController.current?.abort()
+      setLoadingMore(false)
+      onConflict(error)
+    },
+    [onConflict],
+  )
+  const handleAccessError = useCallback(
+    (error: unknown) => {
+      if (isOrganizationContextChanged(error)) handleConflict(error)
+      else if (isAccessDenied(error)) onRevoked()
+      else return false
+      return true
+    },
+    [handleConflict, onRevoked],
+  )
+  const fetchPage = useCallback(
+    (signal: AbortSignal, cursor?: string) =>
+      unwrap(
+        api.GET('/api/v1/team/bookings', {
+          params: {
+            query: { ...query, cursor, bulkSelection: 'true' },
+            header: { 'x-expected-organization-id': expectedOrganizationId },
+          },
+          signal,
+        }),
+      ),
+    [expectedOrganizationId, query],
+  )
   const load = useCallback(
     async (signal: AbortSignal) => {
       try {
-        let page = await unwrap(api.GET('/api/v1/team/bookings', { params: { query }, signal }))
+        const first = await fetchPage(signal)
+        let page: LoadedBookingPages = { ...first, activePage: first }
         for (let depth = 1; depth < loadedPages.current && page.nextCursor; depth += 1) {
-          const next = await unwrap(
-            api.GET('/api/v1/team/bookings', {
-              params: { query: { ...query, cursor: page.nextCursor } },
-              signal,
-            }),
-          )
-          page = { data: [...page.data, ...next.data], nextCursor: next.nextCursor }
+          const next = await fetchPage(signal, page.nextCursor)
+          page = {
+            data: [...page.data, ...next.data],
+            nextCursor: next.nextCursor,
+            activePage: next,
+          }
         }
         if (!signal.aborted) loadedSnapshot.current = page
         return page
       } catch (error) {
-        if (!signal.aborted && isAccessDenied(error)) onRevoked()
-        else if (!signal.aborted && loadedSnapshot.current) {
-          setRefreshError(errorMessage(error))
-          return loadedSnapshot.current
+        if (!signal.aborted) {
+          const handled = handleAccessError(error)
+          if (loadedSnapshot.current) {
+            if (!handled) setRefreshError(errorMessage(error))
+            return loadedSnapshot.current
+          }
         }
         throw error
       } finally {
         if (!signal.aborted) setRefreshing(false)
       }
     },
-    [query, onRevoked],
+    [fetchPage, handleAccessError],
   )
   const [first, reload] = useLoad(load)
-  const latestSource = useRef<BookingPage | null>(null)
+  const latestSource = useRef<LoadedBookingPages | null>(null)
   if (first.status === 'ready') latestSource.current = first.data
-  const [more, setMore] = useState<(BookingPage & { source: BookingPage }) | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [more, setMore] = useState<(LoadedBookingPages & { source: BookingPage }) | null>(null)
   const [moreError, setMoreError] = useState<UiText | null>(null)
   const [status, setStatus] = useState<UiText>('')
   const [selected, setSelected] = useState<Booking | null>(null)
   const opener = useRef<HTMLButtonElement | null>(null)
-  const moreController = useRef<AbortController | null>(null)
   const list = useRef<HTMLTableSectionElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [focusAfterCancellation, setFocusAfterCancellation] = useState(false)
   const confirmLeave = useConfirmLeave()
   const format = zoned(timeZone, formatLocale)
+  const [bulkMode, setBulkMode] = useState(false)
+  const [showReceipt, setShowReceipt] = useState(false)
+  const bulkOpener = useRef<HTMLButtonElement | null>(null)
+  const bulkModeButton = useRef<HTMLButtonElement>(null)
+  const bulkRows = useRef<ReadonlyMap<string, Booking>>(new Map())
+  const selection = useBulkBookingSelection({
+    organizationId: expectedOrganizationId,
+    userId: user.id,
+    onAccessError: handleAccessError,
+  })
+  const resetSelection = selection.reset
+  const refreshBookings = useCallback(() => {
+    resetSelection()
+    moreController.current?.abort()
+    setLoadingMore(false)
+    setMoreError(null)
+    setRefreshError(null)
+    setRefreshing(true)
+    reload()
+  }, [reload, resetSelection])
+  const readySource = first.status === 'ready' ? first.data : null
+  const readyShown = more && more.source === readySource ? more : readySource
+  const pageToken = readyShown?.activePage.bulkPageToken
+  const bulkEnabled = !!pageToken && !conflict
+  const detailOpen = !!(panel?.active || selected)
+  const batch = useBulkCancellationReceipt({
+    enabled: bulkEnabled && !detailOpen,
+    organizationId: expectedOrganizationId,
+    userId: user.id,
+    onAccessError: handleAccessError,
+    refreshBookings,
+  })
+  const abandonRetry = batch.abandonRetry
+  const listBusy = loadingMore || refreshing || !!conflict || !!refreshError
+  const batchPending = !!batch.receipt && batch.result?.state !== 'completed'
+  const canSelect = bulkEnabled && bulkMode && !batchPending
+  const activeIds = new Set(readyShown?.activePage.data.map((row) => row.id))
+  const choices = canSelect
+    ? (readyShown?.data.filter(
+        (row) =>
+          activeIds.has(row.id) && row.status === 'confirmed' && Date.parse(row.start) > Date.now(),
+      ) ?? [])
+    : []
+  const choiceIds = new Set(choices.map((row) => row.id))
+  const selectedIds = selection.ids.filter((id) => choiceIds.has(id))
+  const preview = canSelect && !listBusy ? (selection.confirmation?.preview ?? null) : null
+  const restoreBulkFocus = () => {
+    setTimeout(() => {
+      if (bulkOpener.current?.isConnected && !bulkOpener.current.disabled)
+        bulkOpener.current.focus()
+      else if (bulkModeButton.current?.isConnected && !bulkModeButton.current.disabled)
+        bulkModeButton.current.focus()
+      else heading.current?.focus()
+    })
+  }
 
+  useLayoutEffect(() => {
+    if (listBusy || detailOpen) abandonRetry()
+    if (conflict || detailOpen) resetSelection()
+    if (detailOpen) setShowReceipt(false)
+  }, [abandonRetry, conflict, detailOpen, listBusy, resetSelection])
   useEffect(() => () => moreController.current?.abort(), [])
   useEffect(() => {
     if (first.status !== 'ready') return
@@ -542,27 +648,15 @@ function BookingList({
     setFocusAfterCancellation(false)
   }, [focusAfterCancellation, panel?.active])
 
-  /** Team writes that fail on context or access take the page's recovery paths. */
-  function handleConflict(error: unknown) {
-    moreController.current?.abort()
-    setLoadingMore(false)
-    onConflict(error)
-  }
-  function handleNoShowError(error: unknown): boolean {
-    if (isOrganizationContextChanged(error)) handleConflict(error)
-    else if (isAccessDenied(error)) onRevoked()
-    else return false
-    return true
-  }
-
   function closeDetails() {
     if (!confirmLeave()) return
     setSelected(null)
     setTimeout(() => opener.current?.focus())
   }
 
-  if (first.status === 'loading') return <PageSkeleton label="Loading team bookings…" />
-  if (first.status === 'error') {
+  if (!readySource || !readyShown) {
+    if (conflict) return <OrganizationContextConflict error={conflict} />
+    if (first.status !== 'error') return <PageSkeleton label="Loading team bookings…" />
     return (
       <div className="alert alert-error" role="alert">
         <p>
@@ -575,8 +669,56 @@ function BookingList({
     )
   }
 
-  const source = first.data
-  const shown = more?.source === source ? more : source
+  const source = readySource
+  const shown = readyShown
+  const appliedFilters: [MessageKey, string][] = [
+    ['Bookings', t(tab === 'past' ? 'Past' : tab === 'all' ? 'All bookings' : 'Upcoming')],
+    [
+      'Status',
+      t(
+        query.status === 'confirmed'
+          ? 'Confirmed'
+          : query.status === 'cancelled'
+            ? 'Cancelled'
+            : 'All statuses',
+      ),
+    ],
+    ['Order', t(query.order === 'desc' ? 'Newest first' : 'Oldest first')],
+  ]
+  for (const { name, label } of TIME_FILTERS) {
+    const value = instant(params.get(name))
+    if (value) appliedFilters.push([label, format.dateTime(value)])
+  }
+
+  function reviewCancellation(opener: HTMLButtonElement) {
+    if (!pageToken || !canSelect || listBusy || detailOpen) return
+    bulkOpener.current = opener
+    void selection.review(pageToken, selectedIds)
+  }
+
+  function confirmBulkCancellation() {
+    if (
+      !preview ||
+      listBusy ||
+      batchPending ||
+      batch.retryBlocked ||
+      !selection.confirmation ||
+      Date.now() >= selection.confirmation.expiresLocallyAt ||
+      !preview.items.some(({ code }) => code === 'eligible')
+    )
+      return
+    bulkRows.current = new Map(shown.data.map((booking) => [booking.id, booking]))
+    void batch.submit({ id: preview.confirmationId, expiresAt: preview.expiresAt }, true)
+    resetSelection()
+    setShowReceipt(true)
+  }
+
+  function closeBulkDialog() {
+    selection.close()
+    setShowReceipt(false)
+    restoreBulkFocus()
+  }
+
   const selectedId = panel?.active ? panel.location.pathname.split('/').at(-1) : undefined
   const selectedIndex = shown.data.findIndex((booking) => booking.id === selectedId)
   const panelBooking = shown.data[selectedIndex]
@@ -588,17 +730,10 @@ function BookingList({
     loadedSnapshot.current = patched
     setMore({ ...patched, source })
   }
-  function refreshBookings() {
-    moreController.current?.abort()
-    setLoadingMore(false)
-    setMoreError(null)
-    setRefreshError(null)
-    setRefreshing(true)
-    reload()
-  }
   function cancelled(bookingId: string, background = false) {
     const latest = loadedSnapshot.current ?? shown
-    const updated: BookingPage = {
+    const updated: LoadedBookingPages = {
+      ...latest,
       data:
         query.status === 'confirmed'
           ? latest.data.filter((booking) => booking.id !== bookingId)
@@ -620,7 +755,8 @@ function BookingList({
   /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
   function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
     const latest = loadedSnapshot.current ?? shown
-    const patched: BookingPage = {
+    const patched = {
+      ...latest,
       data: latest.data.map((booking) =>
         booking.id === bookingId ? withNoShowChange(booking, change) : booking,
       ),
@@ -635,29 +771,27 @@ function BookingList({
   }
   async function loadMore(forPanel = false) {
     if (!shown.nextCursor || loadingMore || refreshing || conflict) return
+    resetSelection()
+    abandonRetry()
     const controller = new AbortController()
     moreController.current = controller
     setLoadingMore(true)
     setMoreError(null)
     try {
-      const page = await unwrap(
-        api.GET('/api/v1/team/bookings', {
-          params: { query: { ...query, cursor: shown.nextCursor } },
-          signal: controller.signal,
-        }),
-      )
+      const page = await fetchPage(controller.signal, shown.nextCursor)
       if (controller.signal.aborted) return
       const data = [...(loadedSnapshot.current ?? shown).data, ...page.data]
       loadedPages.current += 1
-      loadedSnapshot.current = { data, nextCursor: page.nextCursor }
-      setMore({ data, nextCursor: page.nextCursor, source })
+      const combined = { data, nextCursor: page.nextCursor, activePage: page }
+      loadedSnapshot.current = combined
+      setMore({ ...combined, source })
       setStatus(msg('Showing {0} bookings.', { '0': data.length }))
       if (page.data[0] && !forPanel) setFocusId(page.data[0].id)
       return page.data[0]?.id
     } catch (error) {
       if (controller.signal.aborted) return
-      if (isAccessDenied(error)) onRevoked()
-      else setMoreError(msg('Could not load more bookings. {0}', { '0': errorMessage(error) }))
+      if (!handleAccessError(error))
+        setMoreError(msg('Could not load more bookings. {0}', { '0': errorMessage(error) }))
     } finally {
       if (!controller.signal.aborted) setLoadingMore(false)
     }
@@ -705,6 +839,104 @@ function BookingList({
         expectedOrganizationId={expectedOrganizationId}
         disabled={!!conflict}
       />
+      {bulkEnabled && (
+        <div className="team-bulk-toolbar">
+          <div className="form-actions">
+            {!batchPending && (
+              <button
+                type="button"
+                className="button"
+                ref={bulkModeButton}
+                disabled={listBusy}
+                onClick={() => {
+                  resetSelection()
+                  setBulkMode(!bulkMode)
+                }}
+              >
+                {t(bulkMode ? 'Exit selection' : 'Select bookings to cancel')}
+              </button>
+            )}
+            <button
+              type="button"
+              className="button"
+              onClick={refreshBookings}
+              disabled={refreshing || loadingMore}
+            >
+              {t('Refresh bookings')}
+            </button>
+            {batch.receipt && (
+              <button
+                type="button"
+                className="button"
+                onClick={(event) => {
+                  bulkOpener.current = event.currentTarget
+                  setShowReceipt(true)
+                }}
+              >
+                {t('View bulk cancellation')}
+              </button>
+            )}
+          </div>
+          <div role="status" aria-atomic="true">
+            {!showReceipt && batch.result && (
+              <p>
+                {t(bulkResultTitle(batch.result.state))}{' '}
+                <BulkCancellationCounts result={batch.result} />
+              </p>
+            )}
+          </div>
+          {!showReceipt && batch.issue && (
+            <p className="alert alert-error" role="alert">
+              {ui(batch.issue)}
+            </p>
+          )}
+          {canSelect && (
+            <>
+              <p role="status" aria-atomic="true">
+                {t('{count} selected on this page (maximum {limit}).', {
+                  count: selectedIds.length,
+                  limit: MAX_BULK_SELECTION,
+                })}
+              </p>
+              {choices.length === 0 && !listBusy && (
+                <p className="hint">{t('No bookings on this page can be selected.')}</p>
+              )}
+              <div className="form-actions">
+                {choices.length > 0 && choices.length <= MAX_BULK_SELECTION && (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={
+                      listBusy || selection.loading || selectedIds.length === choices.length
+                    }
+                    onClick={() => selection.setIds(choices.map((row) => row.id))}
+                  >
+                    {t('Select this page')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={
+                    listBusy ||
+                    selection.loading ||
+                    selection.rateLimited ||
+                    selectedIds.length === 0
+                  }
+                  onClick={(event) => reviewCancellation(event.currentTarget)}
+                >
+                  {t(selection.loading ? 'Loading…' : 'Review cancellation')}
+                </button>
+              </div>
+              {selection.issue && (
+                <p className="alert alert-error" role="alert">
+                  {ui(selection.issue)}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {shown.data.length === 0 ? (
         <EmptyState title={t('No team bookings match these filters.')}>
           <p>
@@ -735,6 +967,33 @@ function BookingList({
                   <tr key={booking.id}>
                     <td data-label={t('When')} className="fit booking-when">
                       <div className="table-value">
+                        {choiceIds.has(booking.id) && (
+                          <label className="team-bulk-check">
+                            <input
+                              type="checkbox"
+                              aria-label={t('Select booking: {event}, {time}', {
+                                event: booking.eventType?.title ?? t('Deleted event type'),
+                                time: format.dateTime(booking.start),
+                              })}
+                              aria-describedby={`select-booking-${booking.id}`}
+                              checked={selectedIds.includes(booking.id)}
+                              disabled={
+                                listBusy ||
+                                selection.loading ||
+                                (selectedIds.length >= MAX_BULK_SELECTION &&
+                                  !selectedIds.includes(booking.id))
+                              }
+                              onChange={(event) => {
+                                if (event.currentTarget.checked)
+                                  selection.setIds([...selectedIds, booking.id])
+                                else selection.setIds(selectedIds.filter((id) => id !== booking.id))
+                              }}
+                            />
+                            <span className="visually-hidden" id={`select-booking-${booking.id}`}>
+                              <bdi>{invitee?.name ?? booking.id}</bdi>
+                            </span>
+                          </label>
+                        )}
                         <time dateTime={booking.start}>
                           <span className="nowrap">{format.date(booking.start)}</span>{' '}
                           <span className="nowrap">
@@ -815,7 +1074,7 @@ function BookingList({
                           expectedOrganizationId={expectedOrganizationId}
                           disabled={!!conflict}
                           onChanged={(change) => applyNoShow(booking.id, change, true)}
-                          onError={handleNoShowError}
+                          onError={handleAccessError}
                         />
                       </div>
                     </td>
@@ -842,6 +1101,37 @@ function BookingList({
             {loadingMore ? t('Loading…') : t('Show more bookings')}
           </button>
         </div>
+      )}
+      {bulkEnabled && !detailOpen && (preview || showReceipt) && (
+        <BulkCancellationDialog
+          preview={preview}
+          result={batch.result}
+          issue={batch.issue}
+          checking={!!batch.receipt && !batch.stopped}
+          unconfirmed={batch.unconfirmed}
+          retry={
+            batch.canRetry && batch.receipt
+              ? () => {
+                  if (batch.receipt) void batch.submit(batch.receipt, false)
+                }
+              : undefined
+          }
+          retryBlocked={batch.retryBlocked || listBusy}
+          busy={listBusy || batch.retryBlocked}
+          rows={
+            preview
+              ? new Map(shown.data.map((booking) => [booking.id, booking]))
+              : new Map([
+                  ...shown.data.map((booking) => [booking.id, booking] as const),
+                  ...bulkRows.current,
+                ])
+          }
+          team={organization.name}
+          format={format}
+          filters={appliedFilters}
+          close={closeBulkDialog}
+          confirm={confirmBulkCancellation}
+        />
       )}
       {selectedId && panel && (
         <BookingPanel
