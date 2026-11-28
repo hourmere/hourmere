@@ -23,6 +23,13 @@ const eventTitle = 'Coordinator consultation'
 const formTitle = 'Coordinator intake'
 const workflowTitle = 'Coordinator reminder'
 
+function eventSwitch(page: Page) {
+  return page
+    .getByRole('row')
+    .filter({ has: page.getByRole('rowheader', { name: eventTitle, exact: true }) })
+    .getByRole('switch')
+}
+
 async function seedManagedDefinitions(page: Page, url: string, teamId: string) {
   const headers = { origin: url, 'x-expected-organization-id': teamId }
   const form = await page.request.post(`${url}/api/v1/routing-forms`, {
@@ -70,9 +77,7 @@ test.describe('legacy controls with custom roles switched off', () => {
     const workflows = nav.getByRole('link', { name: copy.Workflows, exact: true })
     await page.goto(roles.url + PATHS.eventTypes)
     await expect(main.getByRole('link', { name: copy['New event type'] })).toBeVisible()
-    await expect(
-      main.getByRole('switch', { name: copy['Enable {0}'].replace('{0}', eventTitle) }),
-    ).toBeEnabled()
+    await expect(eventSwitch(page)).toBeEnabled()
     await expect(main.getByRole('link', { name: copy['Set your weekly hours'] })).toBeVisible()
 
     await routing.click()
@@ -125,9 +130,7 @@ test('custom Member actions disappear when the same browser becomes an unrenewed
   const routing = nav.getByRole('link', { name: copy['Routing forms'], exact: true })
   const workflows = nav.getByRole('link', { name: copy.Workflows, exact: true })
   const newEvent = main.getByRole('link', { name: copy['New event type'] })
-  const eventToggle = main.getByRole('switch', {
-    name: copy['Enable {0}'].replace('{0}', eventTitle),
-  })
+  const eventToggle = eventSwitch(page)
   await page.goto(roles.url + PATHS.eventTypes)
   await expect(eventToggle).toBeChecked()
   await expect(newEvent).toHaveCount(0)
@@ -150,7 +153,11 @@ test('custom Member actions disappear when the same browser becomes an unrenewed
   await expect(main.getByRole('button', { name: copy['Save draft'] })).toHaveCount(0)
   await runPreview.click()
   await expect(main.getByRole('heading', { name: copy['Preview result'] })).toBeVisible()
-  await expect(main.getByText('Contact the scheduling coordinator', { exact: true })).toBeVisible()
+  await expect(
+    main.getByTestId('routing-preview-result').getByText('Contact the scheduling coordinator', {
+      exact: true,
+    }),
+  ).toBeVisible()
 
   await workflows.click()
   const details = main

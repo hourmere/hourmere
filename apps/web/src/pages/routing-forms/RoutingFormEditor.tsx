@@ -14,7 +14,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { randomKey } from '../../public/api.ts'
-import { useTeamPagePermissions } from '../../team-page-permissions.ts'
+import { routingFormPermissions, useTeamPagePermissions } from '../../team-page-permissions.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { RoutingFormPreview } from './RoutingFormPreview.tsx'
 import { RoutingFormPublication, type RoutingPublicationAction } from './RoutingFormPublication.tsx'
@@ -193,10 +193,13 @@ export function RoutingFormEditor({
   const [current, setCurrent] = useState(form)
   const canSave =
     permissions.status === 'fixed' ||
-    permissions.allows(current ? 'routing_forms.update' : 'routing_forms.create')
-  const canPreview = permissions.status === 'fixed' || permissions.allows('routing_forms.preview')
-  const canPublish = permissions.status === 'fixed' || permissions.allows('routing_forms.publish')
-  const canArchive = permissions.status === 'fixed' || permissions.allows('routing_forms.archive')
+    permissions.allows(current ? routingFormPermissions.update : routingFormPermissions.create)
+  const canPreview =
+    permissions.status === 'fixed' || permissions.allows(routingFormPermissions.preview)
+  const canPublish =
+    permissions.status === 'fixed' || permissions.allows(routingFormPermissions.publish)
+  const canArchive =
+    permissions.status === 'fixed' || permissions.allows(routingFormPermissions.archive)
   const [draft, setDraft] = useState<RoutingDraft>(() =>
     form
       ? fieldsFrom(form)

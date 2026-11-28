@@ -10,7 +10,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
-import { useTeamPagePermissions } from '../../team-page-permissions.ts'
+import { routingFormPermissions, useTeamPagePermissions } from '../../team-page-permissions.ts'
 import { RoutingFormEditor } from './RoutingFormEditor.tsx'
 import { getRoutingForm, listRoutingForms } from './routing-form-api.ts'
 
@@ -22,8 +22,8 @@ export function RoutingFormsPage() {
   const permissions = useTeamPagePermissions()
   const createOnly =
     permissions.status === 'ready' &&
-    permissions.allows('routing_forms.create') &&
-    !permissions.allows('routing_forms.read')
+    permissions.allows(routingFormPermissions.create) &&
+    !permissions.allows(routingFormPermissions.read)
   usePageTitle('Routing forms')
   return (
     <>
@@ -31,7 +31,7 @@ export function RoutingFormsPage() {
       {createOnly ? (
         <NewRoutingFormLink />
       ) : (
-        <RoutingAccess operation="routing_forms.read" list>
+        <RoutingAccess operation={routingFormPermissions.read} list>
           <RoutingFormList
             key={`${me.user.id}:${me.organization.id}`}
             organizationId={me.organization.id}
@@ -50,7 +50,7 @@ export function NewRoutingFormPage() {
     <div data-testid="routing-form-new">
       <BackToList />
       <PageHeader title={t('New routing form')} />
-      <RoutingAccess operation="routing_forms.create">
+      <RoutingAccess operation={routingFormPermissions.create}>
         <RoutingFormEditor
           key={`${me.user.id}:${me.organization.id}`}
           organizationId={me.organization.id}
@@ -70,7 +70,7 @@ export function EditRoutingFormPage() {
   const spaces = query.getAll('organizationId')
   const organizationId = me.organization.id
   const title =
-    permissions.status === 'fixed' || permissions.allows('routing_forms.update')
+    permissions.status === 'fixed' || permissions.allows(routingFormPermissions.update)
       ? 'Edit routing form'
       : 'Details'
   usePageTitle(title)
@@ -78,7 +78,7 @@ export function EditRoutingFormPage() {
     <>
       <BackToList />
       <PageHeader title={t(title)} />
-      <RoutingAccess operation="routing_forms.read">
+      <RoutingAccess operation={routingFormPermissions.read}>
         {formId.test(id) &&
         (spaces.length === 0 || (spaces.length === 1 && spaces[0] === organizationId)) ? (
           <RoutingFormEdit
@@ -109,7 +109,7 @@ function RoutingAccess({
   list = false,
   children,
 }: {
-  operation: 'routing_forms.read' | 'routing_forms.create'
+  operation: typeof routingFormPermissions.read | typeof routingFormPermissions.create
   list?: boolean
   children: ReactNode
 }) {
@@ -216,7 +216,7 @@ function RoutingFormList({ organizationId }: { organizationId: string }) {
   const { data } = state.data.value
   return (
     <>
-      {(permissions.status === 'fixed' || permissions.allows('routing_forms.create')) && (
+      {(permissions.status === 'fixed' || permissions.allows(routingFormPermissions.create)) && (
         <NewRoutingFormLink />
       )}
       {data.length ? (

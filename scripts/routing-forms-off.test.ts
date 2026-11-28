@@ -163,6 +163,8 @@ const ROLE_DATA_DECLARATIONS: Record<string, readonly string[]> = {
     'mcpCustomOperations',
   ],
   'apps/server/src/mcp/team-tools.ts': ['toolOperations'],
+  'apps/server/src/me.ts': ['managementOperations'],
+  'apps/web/src/team-page-permissions.ts': ['routingFormPermissions'],
   'apps/web/src/pages/custom-roles/permissions.ts': [
     'permissionAreas',
     'permissionLabels',

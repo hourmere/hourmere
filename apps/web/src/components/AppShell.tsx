@@ -7,7 +7,7 @@ import { AppNotFoundPage } from '../pages/NotFound.tsx'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
-import { teamPageAllows } from '../team-page-permissions.ts'
+import { routingFormPermissions, teamPageAllows } from '../team-page-permissions.ts'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { AccountMenu } from './AccountMenu.tsx'
 import { JoinedTeamNotice } from './JoinedTeamNotice.tsx'
@@ -190,8 +190,8 @@ function Shell() {
       teamPageAllows(me, 'workflows.preview', false))
   const showRoutingForms =
     routingFormsEnabled === true &&
-    (teamPageAllows(me, 'routing_forms.read', managesSpace) ||
-      teamPageAllows(me, 'routing_forms.create', false))
+    (teamPageAllows(me, routingFormPermissions.read, managesSpace) ||
+      teamPageAllows(me, routingFormPermissions.create, false))
   const showMeetingPolls = me.organization.personal || managesTeam
   const showAuditLog =
     teamAccess.status === 'ready' &&
