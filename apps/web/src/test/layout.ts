@@ -1,3 +1,4 @@
+import { tokens } from '@hourmere/design-tokens'
 import { expect } from 'vitest'
 import publicStyles from '../public/public.css?raw'
 import styles from '../styles.css?raw'
@@ -13,8 +14,9 @@ export function expectStackGap(element: HTMLElement, compactButton?: HTMLElement
     expect(computed.gap).toBe('var(--space-3)')
     if (compactButton) expect(getComputedStyle(compactButton).justifySelf).toBe('start')
     expect(getComputedStyle(document.documentElement).getPropertyValue('--space-3').trim()).toBe(
-      '12px',
+      'var(--hm-space-3)',
     )
+    expect(tokens['--hm-space-3']).toBe('12px')
   } finally {
     sheet.remove()
   }

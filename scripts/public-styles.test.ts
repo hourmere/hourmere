@@ -58,7 +58,9 @@ const contrast = (foreground: number[], background: number[], opacity: number) =
 
 it('keeps the light footer text and cobalt mark comfortably above 4.5:1 after opacity', () => {
   const style = document.createElement('style')
-  style.textContent = `${readFileSync('apps/web/src/styles.css', 'utf8')}\n${publicStyles}`
+  const sharedStyles = readFileSync('packages/design-tokens/tokens.css', 'utf8')
+  const webStyles = readFileSync('apps/web/src/styles.css', 'utf8')
+  style.textContent = `${sharedStyles}\n${webStyles}\n${publicStyles}`
   const wrapper = document.createElement('div')
   wrapper.className = 'public'
   wrapper.innerHTML = '<footer class="public-footer"><a>Powered by Hourmere</a></footer>'

@@ -124,7 +124,7 @@ if (languagePicker && languageTrigger && languageMenu) {
 }
 `
 
-// Minimal copies of apps/web/src/styles.css tokens: this page must load no external assets.
+// A subset of the web app's design tokens, inlined on this self-contained page.
 const STYLE = `
 :root {
   --cobalt: #1f4fd8;
